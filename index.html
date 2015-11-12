@@ -48,12 +48,10 @@ function uploadFile(url, file) {
 }
 
 function checkProgress(url){
-    console.log(url);
     var xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.send(null);
     xhr.onload = function(e) {
-        console.log(xhr.response);
         var percent = xhr.response;
         if (percent == 100.00){
             clearInterval(check_progress);

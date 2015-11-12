@@ -7,14 +7,13 @@ import string
 import random
 import os
 import asyncio
+import re
 
 import multiprocessing as mp
 from queue import Queue
 
 PORT = 8000
 CHUNKSIZE=1024*200 # 200kb
-UPLOAD_NAME="upload/%s_%s"
-TMP_FILE="/tmp/file_%s"
 
 def percentage(part, whole):
     return "%.2f" % (part / whole * 100)
@@ -30,7 +29,7 @@ class FileLoader(CGIHTTPRequestHandler):
     files = {}
     def do_POST(self):
         file_id = rand_id()
-        self.files[file_id] = {"tmp": TMP_FILE % file_id}
+        self.files[file_id] = {}
 
         self.send_response(200)
         self.send_header("Content-type", "text")
@@ -39,7 +38,6 @@ class FileLoader(CGIHTTPRequestHandler):
         self.wfile.write(bytes(file_id, "utf-8"))
 
     def do_PUT(self):
-        print(self.rfile)
         file_id = self.path.replace('/', '')
         if file_id not in self.files:
             self.send_response(404)
@@ -49,13 +47,18 @@ class FileLoader(CGIHTTPRequestHandler):
             self.wfile.write(bytes("No such file_id", "utf-8"))
             return
 
-        self.files[file_id]["len"] = int(self.headers['content-length'])
+        is_succ, s = self.save_file(file_id)
         
-        self.send_response(200)
+        if is_succ:
+            status = 200
+        else:
+            status = 400
+
+        self.send_response(status)
         self.send_header("Content-type", "text")
         self.end_headers()
 
-        self.wfile.write(bytes(self.save_file(file_id), "utf-8"))
+        self.wfile.write(bytes(s, "utf-8"))
 
     def do_GET(self):
         file_id = self.path.replace('/', '')
@@ -66,44 +69,64 @@ class FileLoader(CGIHTTPRequestHandler):
             self.send_header("Content-type", "text")
             self.end_headers()
 
-            self.wfile.write(bytes(percentage(os.stat(self.files[file_id]["tmp"]).st_size, self.files[file_id]["len"]), "utf-8"))
+            if "path" in self.files[file_id]:
+                self.wfile.write(bytes(percentage(os.stat(self.files[file_id]["path"]).st_size, self.files[file_id]["len"]), "utf-8"))
+            else:
+                self.wfile.write(bytes("0.0", "utf-8"))
+
 
 
     def save_file(self, file_id):
-        length = self.files[file_id]["len"]
-        tmp = open(self.files[file_id]["tmp"], "w+b")
+        boundary = bytes(self.headers['content-type'].split("=")[1], 'utf-8')
+        boundary_line_re = re.compile(b'\r\n[-]+' + boundary + b'[-]+\r\n')
 
-        tmp_len = length
-        while tmp_len > 0:
-            print(percentage(tmp_len, length))
-            part = self.rfile.read(min(tmp_len, CHUNKSIZE))
-            if not part: break
-            tmp.write(part)
-            tmp_len -= len(part)
-        tmp.seek(0)
+        remainbytes = int(self.headers['content-length'])
+        line = self.rfile.readline()
+        remainbytes -= len(line)
 
-        form = cgi.FieldStorage(
-            fp=tmp,
-            headers=self.headers,
-            environ={
-                'REQUEST_METHOD':'POST',
-                'CONTENT_TYPE':self.headers['Content-Type'],
-        })
+        line = self.rfile.readline()
+        remainbytes -= len(line)
+        fn = re.findall(r'Content-Disposition.*name="file"; filename="(.*)"', str(line))
+        if not fn:
+            return (False, "Can't find file name...")
+        os.mkdir(os.path.join("upload", file_id))
+        fn = os.path.join("upload", file_id, fn[0])
 
-        upload = form['file']
-        if upload.filename:
-            name = os.path.basename(upload.filename)
-            upload_name = UPLOAD_NAME % (file_id, name)
-            out = open(upload_name, 'wb', CHUNKSIZE)
 
-            while True:
-                packet = upload.file.read(CHUNKSIZE)
-                if not packet:
-                    break
-                out.write(packet)
-            out.close()
+        line = self.rfile.readline()
+        remainbytes -= len(line)
+        line = self.rfile.readline()
+        remainbytes -= len(line)
+        try:
+            out = open(fn, 'wb')
+        except IOError:
+            return (False, "Can't create file to write, do you have permission to write?")
+                
+        self.files[file_id]["path"] = fn
+        self.files[file_id]["len"] = remainbytes
 
-            return upload_name
+        chunksize = max(CHUNKSIZE, len(boundary))
+        prechunk = self.rfile.read(chunksize)
+        remainbytes -= len(prechunk)
+
+        while True:
+            if remainbytes:
+                chunk = self.rfile.read(chunksize)
+                remainbytes -= len(chunk)
+                two_chunks = prechunk + chunk
+            else:
+                two_chunks = prechunk
+
+            # print(two_chunks)
+            if boundary in two_chunks:
+                out.write(two_chunks.replace(boundary_line_re.findall(two_chunks)[0], b''))
+                out.close()
+                self.files[file_id]["len"] = os.stat(self.files[file_id]["path"]).st_size
+                return (True, fn)
+            else:
+                out.write(prechunk)
+                prechunk = chunk
+        return (False, "Unexpect Ends of data.")
 
 
 if __name__ == "__main__":
@@ -116,4 +139,3 @@ if __name__ == "__main__":
         pass
 
     httpd.server_close()
-
