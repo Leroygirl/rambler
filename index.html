@@ -4,36 +4,63 @@
 <div class="container">
     <form id="upload-form" role="form" method="post" enctype="multipart/form-data">
       <input id="file-field" type="file" name="file"/>
-      <!--<input id="upload-btn" type="submit" onclick="" class="btn btn-primary" value="Upload"/>
-      -->
-      <div class="progress disabled">
-        <div id="progress-bar" class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%">
-          0%
-        </div>
-      </div>
     </form>
-  <div id="uploaded-tasks-container"></div>
+    <button id="button" type="button">Upload</button>
+    <div id="progress"></div>
+    <a id="link" href=""></a>
 </div>
 
 <script>
-function uploadFiles(url, files) {
-  var formData = new FormData();
+var link_dom = document.getElementById("link");
+var progress_dom = document.getElementById("progress");
+var check_progress;
 
-  for (var i = 0, file; file = files[i]; ++i) {
-    formData.append(file.name, file);
-    console.log(file.name);
-  }
+document.getElementById("button").onclick = function(){
+    link_dom.href = "";
+    link_dom.text = "";
+    progress_dom.textContent = "";
 
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', url, true);
-  xhr.onload = function(e) { };
-
-  xhr.send(formData);
+    var files = document.getElementById("file-field").files;
+    if (files.length){
+        var file = files[0];
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/', true);
+        xhr.send(null);
+        xhr.onload = function(e) {
+           var id = xhr.response;
+           var url = "/" + id.toString();
+           uploadFile(url, file);
+        };
+    }
+};
+function uploadFile(url, file) {
+   var formData = new FormData();
+   formData.append('file', file);
+   var xhr1 = new XMLHttpRequest();
+   xhr1.open('PUT', url, true);
+   xhr1.send(formData);
+   check_progress = setInterval(function() {checkProgress(url); }, 100);
+   xhr1.onload = function(e){
+       document.getElementById("file-field").value = "";
+       link_dom.href = xhr1.response;
+       link_dom.text = "Link";
+   }
 }
 
-document.querySelector('input[type="file"]').addEventListener('change', function(e) {
-  uploadFiles('/', this.files);
-}, false);
+function checkProgress(url){
+    console.log(url);
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.send(null);
+    xhr.onload = function(e) {
+        console.log(xhr.response);
+        var percent = xhr.response;
+        if (percent == 100.00){
+            clearInterval(check_progress);
+        }
+        progress_dom.textContent = percent.toString() + " %";
+    };
+}
 
 </script>
 </body>
